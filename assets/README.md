@@ -321,5 +321,291 @@ int main() {
 
 # Soal 2
 Solved by. 061_Raihan Fahri Ghazali 
-## A. Download and Shared Memory
 
+# Soal 2 - RushGo Delivery Management System 
+
+Repositori ini berisi implementasi sistem manajemen pengiriman untuk perusahaan ekspedisi RushGo. Sistem terdiri dari dua program utama:
+
+- `delivery_agent.c` → Mengurus pengiriman **Express** secara otomatis.
+- `dispatcher.c` → Menangani pengiriman **Reguler**, pengecekan status, dan daftar pesanan.
+
+---
+
+## ✅ Penjelasan Berdasarkan Soal
+
+---
+
+###  A. Mengunduh File Order dan Menyimpannya ke Shared Memory
+
+- Di awal program (`delivery_agent.c` dan `dispatcher.c`), file CSV diunduh otomatis menggunakan:
+
+```c
+system("curl -L -o delivery_order.csv 'https://drive.google.com/uc?export=download&id=1OJfRuLgsBnIBWtdRXbRsD2sG6NhMKOg9'");
+```
+Setelah diunduh, data dibaca per baris dan disimpan ke struktur shared memory:
+```
+typedef struct {
+    char nama_penerima[50];
+    char alamat[100];
+    char tipe[10];
+    int delivered;
+} Order;
+
+typedef struct {
+    int total_orders;
+    Order orders[MAX_ORDERS];
+} SharedData;
+```
+Shared memory dibuat dengan shmget() dan di-attach dengan shmat():
+```
+int shmid = shmget(SHM_KEY, sizeof(SharedData), IPC_CREAT | 0666);
+shared_data = (SharedData *)shmat(shmid, NULL, 0);
+```
+
+###  B. Pengiriman Bertipe Exprees
+Pada file delivery_agent.c, dilakukan pemrosesan otomatis untuk pesanan bertipe Express. Tiga agen (AGENT A, AGENT B, AGENT C) dibuat sebagai thread terpisah:
+```c
+pthread_t agents[3];
+pthread_create(&agents[0], NULL, agent_thread, "AGENT A");
+pthread_create(&agents[1], NULL, agent_thread, "AGENT B");
+pthread_create(&agents[2], NULL, agent_thread, "AGENT C");
+```
+Setiap thread menelusuri shared memory, mencari order Express yang belum dikirim:
+```c
+if (strcmp(order->tipe, "Express") == 0 && order->delivered == 0) {
+    order->delivered = 1;
+    log_delivery(agent, order->nama_penerima, order->alamat);
+}
+```
+Log pengiriman dicatat ke dalam delivery.log dengan format:
+```
+[dd/mm/yyyy hh:mm:ss] [AGENT X] Express package delivered to [Nama] in [Alamat]
+```
+
+### C. Pengiriman Bertipe Reguler
+Fungsi delivery_reguler() akan:
+- mencari order dengan tope == "Reguler" dan nama_penerima == nama yang belum dikirim.
+- menandainya sebagai telah dikirim dan mencatat ke log
+```c
+if (strcmp(order->tipe, "Reguler") == 0 &&
+    strcmp(order->nama_penerima, nama_user) == 0 &&
+    order->delivered == 0) {
+    order->delivered = 1;
+    log_delivery(nama_user, order->nama_penerima, order->alamat, "Reguler");
+}
+```
+format log akan saperti ini : 
+```
+[dd/mm/yyyy hh:mm:ss] [AGENT <user>] Reguler package delivered to [Nama] in [Alamat]
+```
+
+### C. pengiriman Bertipe Reguler 
+Pada file dispatcher.c pengiriman Reguler dilakukan secara manual dengan perintah:
+```
+./dispatcher -deliver [NamaPenerima]
+
+```
+Fungsi delivery_reguler akan :
+- Mencari orderan dengan tipe == "Reguler" dan nama_penerima == nama yang belum dikirim
+- Menandainya sebagai telah dikirim dan mencatat ke log
+```
+if (strcmp(order->tipe, "Reguler") == 0 &&
+    strcmp(order->nama_penerima, nama_user) == 0 &&
+    order->delivered == 0) {
+    order->delivered = 1;
+    log_delivery(nama_user, order->nama_penerima, order->alamat, "Reguler");
+}
+```
+Format log
+```
+[dd/mm/yyyy hh:mm:ss] [AGENT <user>] Reguler package delivered to [Nama] in [Alamat]
+```
+
+### D. Mengecheck Status Pesanan 
+Pengguna dapat mengecheck status pesanan via:
+```
+./dispatcher -status [NamaPenerima]
+```
+Fungsi check_status akan membuka delivery.log, lalu mencari apakah nama tersebut sudah benar
+```
+if (strcmp(nama_penerima, nama_user) == 0) {
+    printf("Status for %s: Delivered by %s\n", nama_user, agent);
+}
+```
+jika ditemukan di log, maka status dianggap Pending 
+```
+Status for [Nama]: Pending
+```
+
+### E. Melihat Daftar Semua Pesanan
+Pengguna dapat menjalankan melalui 
+```
+./dispatcher -list
+```
+
+Fungsi list_orders() akan mencetak semua pesanan yang ada di shared memory:
+```
+printf("- %s (%s) [%s] : %s\n",
+       order->nama_penerima,
+       order->alamat,
+       order->tipe,
+       order->delivered ? "Delivered" : "Pending");
+```
+Akhirnya menghasilkan output seperti ini :
+```
+📋 Daftar Semua Pesanan:
+- Budi (Jl. Mawar) [Express] : Delivered
+- Siti (Jl. Anggrek) [Reguler] : Pending
+```
+
+# Soal 3 - The Lost Dungeon
+
+Repositori ini berisi implementasi **permainan berbasis client-server untuk mensimulasikan petualangan di dalam dungeon misterius**. Sistem terdiri dari dua program utama:
+
+- `dungeon.c` → Berperan sebagai **server** yang menangani semua logika permainan, termasuk pertempuran, toko senjata, dan inventory.
+- `player.c` → Berperan sebagai **client** yang digunakan oleh pemain untuk berinteraksi dengan dungeon secara interaktif melalui menu.
+
+Selain itu, sistem juga menggunakan `shop.c` dan `shop.h` sebagai modul pendukung untuk menyimpan daftar senjata dan efek passive yang tersedia di toko.
+
+### A. Entering the Dungeon
+Dungeon.c  akan berfungsi sebagai RPC server, menerima koneksi dari satu atau lebih client (player.c). player.c membuka koneksi ke dungeon.c menggunakan socket
+```
+int server_fd = socket(...); 
+bind(...);
+listen(...);
+accept(...);
+pthread_create(...);
+```
+Mendirikan server dungeon menggunakan socket TCP dan multithreading agar bisa melayani banyak client.
+```
+int sock = socket(...);
+connect(...);
+```
+Menghubugkan Client ke dungeon server
+
+### B. Sightseeing (Menu Interaktif)
+Saat opsi "Show Player Stats" dipilih, player.c mengirim "SHOW_STATS" ke server. dungeon.c akan memprosesnya dan mengembalikan status player.
+```
+// player.c
+send_command(sock, "SHOW_STATS");
+```
+```
+// dungeon.c
+else if (strcmp(buffer, "SHOW_STATS") == 0)
+    get_player_stats(response);
+```
+```
+// dungeon.c
+void get_player_stats(char *response) {
+    int idx = player.inventory[player.equipped];
+    Weapon w = shop_weapons[idx];
+    snprintf(response, 1024,
+        "\n=== \033[1;36mPLAYER STATS\033[0m ===\n"
+        "\033[1;33mGold\033[0m: %d | \033[1;32mEquipped Weapon\033[0m: %s | \033[1;31mBase Damage\033[0m: %d | \033[1;34mKills\033[0m: %d",
+        player.gold, w.name, w.damage, player.kills);
+}
+```
+Code diatas akan Menampilkan status player: Gold, senjata yang dipakai, base damage, dan jumlah musuh yang dikalahkan.
+
+### C. Weapon Shop
+Saat opsi "Shop" dipilih, player mengirim "SHOP" lalu memilih senjata untuk dibeli dengan "BUY_x".
+
+```
+// player.c
+send_command(sock, "SHOP");
+int w;
+scanf("%d", &w);
+sprintf(command, "BUY_%d", w);
+send_command(sock, command);
+```
+
+```
+// dungeon.c
+else if (strcmp(buffer, "SHOP") == 0) {
+    for (int i = 0; i < MAX_WEAPONS; i++) {
+        snprintf(temp, sizeof(temp), "[%d] %s - Price: %d gold, Damage: %d", i + 1, shop_weapons[i].name, shop_weapons[i].price, shop_weapons[i].damage);
+    }
+}
+```
+
+```
+// dungeon.c
+else if (strncmp(buffer, "BUY_", 4) == 0) {
+    int id = atoi(buffer + 4) - 1;
+    if (player.gold >= shop_weapons[id].price) {
+        player.gold -= shop_weapons[id].price;
+        player.inventory[player.inventory_count++] = id;
+    }
+}
+```
+Menampilkan daftar senjata yang bisa dibeli beserta logic pembeliannya, menggunakan gold milik player.
+
+### D. Handy Inventory
+Saat opsi "View Inventory & Equip Weapon" dipilih, server akan menampilkan semua senjata yang dimiliki dan memberi opsi mengganti senjata aktif.
+```
+// player.c
+send_command(sock, "INVENTORY");
+int sel;
+scanf("%d", &sel);
+sprintf(command, "EQUIP_%d", sel);
+send_command(sock, command);
+```
+
+```
+// dungeon.c
+else if (strcmp(buffer, "INVENTORY") == 0)
+    show_inventory(response);
+
+else if (strncmp(buffer, "EQUIP_", 6) == 0) {
+    int eq = atoi(buffer + 6);
+    player.equipped = eq;
+}
+```
+```
+// dungeon.c
+void show_inventory(char *response) {
+    for (int i = 0; i < player.inventory_count; i++) {
+        Weapon w = shop_weapons[player.inventory[i]];
+        snprintf(temp, sizeof(temp), "[%d] %s", i, w.name);
+        if (i == player.equipped) strcat(response, " \033[1;33m(EQUIPPED)\033[0m");
+    }
+}
+```
+Menampilkan senjata yang dimiliki player dan mengganti senjata aktif.
+
+### E. Battle Mode 
+Saat opsi "Battle Mode" dipilih, client mengirim "BATTLE", lalu dapat menyerang ("attack") atau keluar ("exit").
+```
+// player.c
+send_command(sock, "BATTLE");
+while (1) {
+    fgets(input, sizeof(input), stdin);
+    send(sock, input, strlen(input), 0);
+}
+```
+
+```
+// dungeon.c
+else if (strcmp(buffer, "BATTLE") == 0)
+    start_new_enemy(response);
+else if (strcmp(buffer, "attack") == 0 && in_battle)
+    handle_attack(response);
+else if (strcmp(buffer, "exit") == 0 && in_battle)
+    in_battle = false;
+```
+
+```
+// dungeon.c
+void handle_attack(char *response) {
+    int damage = w.damage + (rand() % 10);
+    if (strstr(w.passive, "Crit")) damage *= 2;
+    else if (strstr(w.passive, "Insta")) damage = enemy_hp;
+    enemy_hp -= damage;
+    if (enemy_hp <= 0) {
+        player.gold += reward;
+        player.kills++;
+        start_new_enemy(next_enemy);
+    }
+}
+```
+Mode pertempuran dengan HP musuh acak. Player memberikan damage berdasarkan senjata dan passive. Musuh baru akan muncul setelah menang.
