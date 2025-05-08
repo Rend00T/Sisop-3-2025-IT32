@@ -318,3 +318,8 @@ int main() {
     return 0;
 }
 ```
+
+# Soal 2
+Solved by. 061_Raihan Fahri Ghazali 
+## A. Download and Shared Memory
+
