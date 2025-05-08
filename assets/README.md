@@ -174,4 +174,38 @@ Respon untuk perintah/opsi tidak dikenal.
     close(new_socket);
     return NULL;
 ```
-### 
+### Main
+Buat memulai proses daemon, menghubungkan Client, dan menerima perintah/input dari Client.
+```
+int main() {
+    pid_t pid = fork();
+    if (pid < 0) exit(EXIT_FAILURE);
+    if (pid > 0) exit(EXIT_SUCCESS);
+
+    setsid();
+
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    bind(server_fd, (struct sockaddr *)&address, sizeof(address));
+    listen(server_fd, 3);
+
+    while (1) {
+        new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
+        int *pclient = malloc(sizeof(int));
+        *pclient = new_socket;
+        pthread_t t;
+        pthread_create(&t, NULL, handle_client, pclient);
+        pthread_detach(t);
+    }
+```
+## B. Image Client
